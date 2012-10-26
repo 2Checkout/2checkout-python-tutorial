@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html>
+
+  <head>
+    <meta charset='utf-8' />
+    <meta http-equiv="X-UA-Compatible" content="chrome=1" />
+    <meta name="description" content="2Checkout Python Tutorial : 2Checkout Python Integration Tutorial" />
+
+    <link rel="stylesheet" type="text/css" media="screen" href="stylesheets/stylesheet.css">
+
+    <title>2Checkout Python Tutorial</title>
+  </head>
+
+  <body>
+
+    <!-- HEADER -->
+    <div id="header_wrap" class="outer">
+        <header class="inner">
+          <a id="forkme_banner" href="https://github.com/2Checkout/2checkout-python-tutorial">View on GitHub</a>
+
+          <h1 id="project_title">2Checkout Python Tutorial</h1>
+          <h2 id="project_tagline">2Checkout Python Integration Tutorial</h2>
+
+            <section id="downloads">
+              <a class="zip_download_link" href="https://github.com/2Checkout/2checkout-python-tutorial/zipball/master">Download this project as a .zip file</a>
+              <a class="tar_download_link" href="https://github.com/2Checkout/2checkout-python-tutorial/tarball/master">Download this project as a tar.gz file</a>
+            </section>
+        </header>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div id="main_content_wrap" class="outer">
+      <section id="main_content" class="inner">
+        <h1>Tutorial</h1>
+
+<p>In this tutorial we will walk through integrating the 2Checkout payment method into an existing user management application built on Web.py 0.37 and TwitterBootstrap 2.1.0. This demo application also utilizes the webpy_auth user authentication library. The source for the example application used in this tutorial can be accessed in this Github repository.</p>
+
+<h2>Setting up the Example Application</h2>
+
+<p>We need an existing example application to demonstrate the integration so lets download or clone the 2checkout-python-tutorial tutorial application.</p>
+
+<div class="highlight"><pre><span class="nv">$ </span>git clone https://github.com/2checkout/2checkout-python-tutorial.git
+</pre></div>
+
+<p>This repository contains both an example before and after application so that we can follow along with the tutorial using the site_before app and compare the result with the site_after app. We can start by moving the site_before directory to the webroot directory on our server and lets rename it to web-widgets which is the name of our example site.</p>
+
+<p>Now we need to create our database.</p>
+
+<div class="highlight"><pre>create database webwidgets;
+</pre></div>
+
+<p>Next we run the schema.sql file on our database.</p>
+
+<div class="highlight"><pre>mysql webwidgets &lt; schema.sql -u &lt;mysql username&gt; -p
+</pre></div>
+
+<p>Now we can specify our database credentials in our application.</p>
+
+<p>code.py</p>
+
+<div class="highlight"><pre><span class="n">db</span> <span class="o">=</span> <span class="n">web</span><span class="o">.</span><span class="n">database</span><span class="p">(</span><span class="n">dbn</span><span class="o">=</span><span class="s">'mysql'</span><span class="p">,</span> <span class="n">db</span><span class="o">=</span><span class="s">'site'</span><span class="p">,</span> <span class="n">user</span><span class="o">=</span><span class="s">'root'</span><span class="p">,</span> <span class="n">passwd</span><span class="o">=</span><span class="s">''</span><span class="p">)</span>
+</pre></div>
+
+<p>Let's go ahead and startup the example application.</p>
+
+<div class="highlight"><pre><span class="nb">cd </span>web-widgets
+python code.py
+</pre></div>
+
+<p>We can then view it at <a href="http://localhost:8080">http://localhost:8080</a>.</p>
+
+<p><img src="http://github.com/2checkout/2checkout-python-tutorial/raw/master/img/webwidgets-1.png" alt=""></p>
+
+<p>You can see that this site requires users to signup for a membership to access the web-widget content pages.</p>
+
+<h2>Adding the routes</h2>
+
+<p>In this tutorial, we will integrate the 2Checkout payment method so that the user must order a recurring monthly membership before gaining access to the content. We will also setup a listener that will be responsible for updating user access for the contact based on the Notifications that 2Checkout sends on their recurring billing status. Finially we will utilize 2Checkout's API to provide user with the ability to update their billing information and cancel their recurring membership. We already have a route that we can use for the success callback, so let go ahead an setup the URL's for the other classes we will create.</p>
+
+<p>code.py</p>
+
+<div class="highlight"><pre><span class="n">urls</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="s">'/'</span><span class="p">,</span> <span class="s">'index'</span><span class="p">,</span>
+    <span class="s">'/login'</span><span class="p">,</span> <span class="s">'login'</span><span class="p">,</span>
+    <span class="s">'/logout'</span><span class="p">,</span> <span class="s">'logout'</span><span class="p">,</span>
+    <span class="s">'/content'</span><span class="p">,</span> <span class="s">'content'</span><span class="p">,</span>
+    <span class="s">'/register'</span><span class="p">,</span> <span class="s">'register'</span><span class="p">,</span>
+    <span class="s">'/success'</span><span class="p">,</span> <span class="s">'success'</span><span class="p">,</span>
+    <span class="s">'/order'</span><span class="p">,</span> <span class="s">'order'</span><span class="p">,</span>
+    <span class="s">'/notification'</span><span class="p">,</span> <span class="s">'notification'</span><span class="p">,</span>
+    <span class="s">'/cancel'</span><span class="p">,</span> <span class="s">'cancel'</span><span class="p">,</span>
+    <span class="s">'/update'</span><span class="p">,</span> <span class="s">'update'</span><span class="p">,</span>
+<span class="p">)</span>
+</pre></div>
+
+<h2>Setting up the 2Checkout Python Library</h2>
+
+<p>2Checkout's Python library provides us with a simple bindings to the API, INS and Checkout process so that we can integrate each feature with only a few lines of code. We can download or clone the library at <a href="https://github.com/2checkout/2checkout-python">https://github.com/2checkout/2checkout-python</a>.</p>
+
+<p>Including the library is as easy as copying the <strong>twocheckout</strong> directory to our application's <strong>lib</strong> directory and then we can import the library.</p>
+
+<p>code.py</p>
+
+<div class="highlight"><pre><span class="kn">import</span> <span class="nn">twocheckout</span>
+</pre></div>
+
+<p>Now we can integrate with any 2Checkout feature using only a couple lines of code.</p>
+
+<h2>Setup Order</h2>
+
+<p>Let's take a look at our current registration process.</p>
+
+<p>code.py</p>
+
+<div class="highlight"><pre><span class="k">class</span> <span class="nc">register</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">GET</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">render</span><span class="o">.</span><span class="n">register</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">POST</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">params</span> <span class="o">=</span> <span class="n">web</span><span class="o">.</span><span class="n">input</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">auth</span><span class="o">.</span><span class="n">userExist</span><span class="p">(</span><span class="n">params</span><span class="p">[</span><span class="s">'username'</span><span class="p">]):</span>
+            <span class="k">return</span> <span class="n">render</span><span class="o">.</span><span class="n">register</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">data</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+            <span class="n">data</span><span class="p">[</span><span class="s">'user_email'</span><span class="p">]</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'email'</span><span class="p">]</span>
+            <span class="n">auth</span><span class="o">.</span><span class="n">createUser</span><span class="p">(</span><span class="n">params</span><span class="p">[</span><span class="s">'username'</span><span class="p">],</span> <span class="n">params</span><span class="p">[</span><span class="s">'password'</span><span class="p">],</span> <span class="n">perms</span><span class="o">=</span><span class="p">[],</span> <span class="o">**</span><span class="n">data</span><span class="p">)</span>
+            <span class="n">user</span> <span class="o">=</span> <span class="n">auth</span><span class="o">.</span><span class="n">authenticate</span><span class="p">(</span><span class="n">login</span><span class="o">=</span><span class="n">params</span><span class="p">[</span><span class="s">'username'</span><span class="p">],</span> <span class="n">password</span><span class="o">=</span><span class="n">params</span><span class="p">[</span><span class="s">'password'</span><span class="p">])</span>
+            <span class="n">auth</span><span class="o">.</span><span class="n">login</span><span class="p">(</span><span class="n">user</span><span class="p">)</span>
+            <span class="n">auth</span><span class="o">.</span><span class="n">addPermission</span><span class="p">(</span><span class="s">'user'</span><span class="p">,</span> <span class="n">user</span><span class="o">.</span><span class="n">user_id</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="n">web</span><span class="o">.</span><span class="n">seeother</span><span class="p">(</span><span class="s">'/success'</span><span class="p">)</span>
+</pre></div>
+
+<p>As you can see, we are currently loading the registration form where we can handle the field validation and pass the data back into the register class by POST. We now want to pass the user to 2Checkout to pay for the membership before we activate them. To accomplish this, lets first remove the <code>auth.addPermission('user', user.user_id)</code> from our register class. We will add permissions later in the success class. We will also need to swap the "/success" redirect for an "/order" redirect and create our new order class.</p>
+
+<div class="highlight"><pre><span class="k">class</span> <span class="nc">order</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">GET</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">user</span> <span class="o">=</span> <span class="n">auth</span><span class="o">.</span><span class="n">getUser</span><span class="p">()</span>
+
+        <span class="c"># Pass sale to 2Checkout</span>
+        <span class="n">params</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s">'sid'</span><span class="p">:</span> <span class="s">'1817037'</span><span class="p">,</span>
+            <span class="s">'mode'</span><span class="p">:</span> <span class="s">'2CO'</span><span class="p">,</span>
+            <span class="s">'li_1_type'</span><span class="p">:</span> <span class="s">'product'</span><span class="p">,</span>
+            <span class="s">'li_1_name'</span><span class="p">:</span> <span class="s">'Subscription'</span><span class="p">,</span>
+            <span class="s">'li_1_price'</span><span class="p">:</span> <span class="s">'1.00'</span><span class="p">,</span>
+            <span class="s">'li_1_recurrence'</span><span class="p">:</span> <span class="s">'1 Month'</span><span class="p">,</span>
+            <span class="s">'merchant_order_id'</span><span class="p">:</span> <span class="n">user</span><span class="o">.</span><span class="n">user_login</span>
+        <span class="p">}</span>
+        <span class="n">link</span> <span class="o">=</span> <span class="n">twocheckout</span><span class="o">.</span><span class="n">Charge</span><span class="o">.</span><span class="n">link</span><span class="p">(</span><span class="n">params</span><span class="p">)</span>
+        <span class="k">raise</span> <span class="n">web</span><span class="o">.</span><span class="n">seeother</span><span class="p">(</span><span class="n">link</span><span class="p">)</span>
+</pre></div>
+
+<p>Lets take a look at what we did here. First we grabbed the user object for this user.</p>
+
+<div class="highlight"><pre><span class="n">user</span> <span class="o">=</span> <span class="n">auth</span><span class="o">.</span><span class="n">getUser</span><span class="p">()</span>
+</pre></div>
+
+<p>Then we create an array of sale parameters to pass to 2Checkout using the Pass-Through-Products parameter set and we assign the <code>user_login</code> to the <code>merchant_order_id</code> parameter. <em>(The value passed with the <code>merchant_order_id parameter</code> will be passed back to our approved URL and will be returned using the <code>vendor_order_id</code> parameter on all INS messages pertaining to the sale.)</em></p>
+
+<div class="highlight"><pre><span class="n">params</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s">'sid'</span><span class="p">:</span> <span class="s">'1817037'</span><span class="p">,</span>
+    <span class="s">'mode'</span><span class="p">:</span> <span class="s">'2CO'</span><span class="p">,</span>
+    <span class="s">'li_1_type'</span><span class="p">:</span> <span class="s">'product'</span><span class="p">,</span>
+    <span class="s">'li_1_name'</span><span class="p">:</span> <span class="s">'Subscription'</span><span class="p">,</span>
+    <span class="s">'li_1_price'</span><span class="p">:</span> <span class="s">'1.00'</span><span class="p">,</span>
+    <span class="s">'li_1_recurrence'</span><span class="p">:</span> <span class="s">'1 Month'</span><span class="p">,</span>
+    <span class="s">'merchant_order_id'</span><span class="p">:</span> <span class="n">user</span><span class="o">.</span><span class="n">user_login</span>
+<span class="p">}</span>
+<span class="n">link</span> <span class="o">=</span> <span class="n">twocheckout</span><span class="o">.</span><span class="n">Charge</span><span class="o">.</span><span class="n">link</span><span class="p">(</span><span class="n">params</span><span class="p">)</span>
+</pre></div>
+
+<p>Then we pass the parameters and the buyer to our custom checkout page on 2Checkout's secure server to complete the order.</p>
+
+<div class="highlight"><pre><span class="k">raise</span> <span class="n">web</span><span class="o">.</span><span class="n">seeother</span><span class="p">(</span><span class="n">link</span><span class="p">)</span>
+</pre></div>
+
+<h2>Passback</h2>
+
+<p>When the order is completed, 2Checkout will return the buyer and the sale parameters to the URL that we specify as the approved URL in our account. This URL can also be passed in dynamically for each sale using the <code>x_receipt_link_url</code> parameter.</p>
+
+<p>We will pass the buyer back to the success url, so we will need to make some changes to our success class to handle the passback.</p>
+
+<p>code.py</p>
+
+<div class="highlight"><pre><span class="k">class</span> <span class="nc">success</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">GET</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">params</span> <span class="o">=</span> <span class="n">web</span><span class="o">.</span><span class="n">input</span><span class="p">()</span>
+        <span class="n">params</span><span class="p">[</span><span class="s">'secret'</span><span class="p">]</span> <span class="o">=</span> <span class="s">'tango'</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">twocheckout</span><span class="o">.</span><span class="n">Passback</span><span class="o">.</span><span class="n">check</span><span class="p">(</span><span class="n">params</span><span class="p">)</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">result</span><span class="p">[</span><span class="s">'response'</span><span class="p">][</span><span class="s">'code'</span><span class="p">]</span> <span class="o">==</span> <span class="s">'SUCCESS'</span><span class="p">:</span>
+
+            <span class="c"># Update the user and give them credentials</span>
+            <span class="n">user_login</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'merchant_order_id'</span><span class="p">]</span>
+            <span class="n">user</span> <span class="o">=</span> <span class="n">auth</span><span class="o">.</span><span class="n">getUser</span><span class="p">(</span><span class="n">user_login</span><span class="p">)</span>
+            <span class="n">data</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+            <span class="n">data</span><span class="p">[</span><span class="s">'last_billed'</span><span class="p">]</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
+            <span class="n">data</span><span class="p">[</span><span class="s">'last_invoice'</span><span class="p">]</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'invoice_id'</span><span class="p">]</span>
+            <span class="n">data</span><span class="p">[</span><span class="s">'order_number'</span><span class="p">]</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'order_number'</span><span class="p">]</span>
+            <span class="n">data</span><span class="p">[</span><span class="s">'2co_status'</span><span class="p">]</span> <span class="o">=</span> <span class="s">'active'</span>
+            <span class="n">data</span><span class="p">[</span><span class="s">'date_expire'</span><span class="p">]</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span> <span class="o">+</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">(</span><span class="mi">1</span><span class="o">*</span><span class="mi">365</span><span class="o">/</span><span class="mi">12</span><span class="p">)</span>
+            <span class="n">auth</span><span class="o">.</span><span class="n">updateUser</span><span class="p">(</span><span class="n">user_login</span><span class="p">,</span> <span class="o">**</span><span class="n">data</span><span class="p">)</span>
+            <span class="n">auth</span><span class="o">.</span><span class="n">addPermission</span><span class="p">(</span><span class="s">'user'</span><span class="p">,</span> <span class="n">user</span><span class="o">.</span><span class="n">user_id</span><span class="p">)</span>
+
+            <span class="c"># Return buyer to success page</span>
+            <span class="k">return</span> <span class="n">render</span><span class="o">.</span><span class="n">success</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+
+            <span class="c"># Return buyer to fail page</span>
+            <span class="k">return</span> <span class="n">render</span><span class="o">.</span><span class="n">fail</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">POST</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">params</span> <span class="o">=</span> <span class="n">web</span><span class="o">.</span><span class="n">input</span><span class="p">()</span>
+        <span class="n">params</span><span class="p">[</span><span class="s">'secret'</span><span class="p">]</span> <span class="o">=</span> <span class="s">'tango'</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">twocheckout</span><span class="o">.</span><span class="n">Passback</span><span class="o">.</span><span class="n">check</span><span class="p">(</span><span class="n">params</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">result</span><span class="p">[</span><span class="s">'response'</span><span class="p">][</span><span class="s">'code'</span><span class="p">]</span> <span class="o">==</span> <span class="s">'SUCCESS'</span><span class="p">:</span>
+
+            <span class="c"># Update the user and give them credentials</span>
+            <span class="n">user_login</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'merchant_order_id'</span><span class="p">]</span>
+            <span class="n">user</span> <span class="o">=</span> <span class="n">auth</span><span class="o">.</span><span class="n">getUser</span><span class="p">(</span><span class="n">user_login</span><span class="p">)</span>
+            <span class="n">data</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+            <span class="n">data</span><span class="p">[</span><span class="s">'last_billed'</span><span class="p">]</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
+            <span class="n">data</span><span class="p">[</span><span class="s">'last_invoice'</span><span class="p">]</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'invoice_id'</span><span class="p">]</span>
+            <span class="n">data</span><span class="p">[</span><span class="s">'order_number'</span><span class="p">]</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'order_number'</span><span class="p">]</span>
+            <span class="n">data</span><span class="p">[</span><span class="s">'2co_status'</span><span class="p">]</span> <span class="o">=</span> <span class="s">'active'</span>
+            <span class="n">data</span><span class="p">[</span><span class="s">'date_expire'</span><span class="p">]</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span> <span class="o">+</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">(</span><span class="mi">1</span><span class="o">*</span><span class="mi">365</span><span class="o">/</span><span class="mi">12</span><span class="p">)</span>
+            <span class="n">auth</span><span class="o">.</span><span class="n">updateUser</span><span class="p">(</span><span class="n">user_login</span><span class="p">,</span> <span class="o">**</span><span class="n">data</span><span class="p">)</span>
+            <span class="n">auth</span><span class="o">.</span><span class="n">addPermission</span><span class="p">(</span><span class="s">'user'</span><span class="p">,</span> <span class="n">user</span><span class="o">.</span><span class="n">user_id</span><span class="p">)</span>
+
+            <span class="c"># Return buyer to success page</span>
+            <span class="k">return</span> <span class="n">render</span><span class="o">.</span><span class="n">success</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+
+            <span class="c"># Return buyer to fail page</span>
+            <span class="k">return</span> <span class="n">render</span><span class="o">.</span><span class="n">fail</span><span class="p">()</span>
+</pre></div>
+
+<p>First we grab all of the parameters returned by 2Checkout and assign them to the <code>params</code> dictionary. We also add our secret word to the params dictionary with <code>secret</code> as the key.</p>
+
+<div class="highlight"><pre><span class="n">params</span> <span class="o">=</span> <span class="n">web</span><span class="o">.</span><span class="n">input</span><span class="p">()</span>
+<span class="n">params</span><span class="p">[</span><span class="s">'secret'</span><span class="p">]</span> <span class="o">=</span> <span class="s">'tango'</span>
+</pre></div>
+
+<p>Then we pass the array and our secret word to the <code>twocheckout.Passback.check()</code> binding and check the result.</p>
+
+<div class="highlight"><pre><span class="n">result</span> <span class="o">=</span> <span class="n">twocheckout</span><span class="o">.</span><span class="n">Passback</span><span class="o">.</span><span class="n">check</span><span class="p">(</span><span class="n">params</span><span class="p">)</span>
+</pre></div>
+
+<p>If the result if successful <code>result.response_code == 'SUCCESS'</code>, we give the user access to the content and display the order success page. If the response is not successful <code>result.response_code == 'FAIL'</code>, we display the order failed page.</p>
+
+<div class="highlight"><pre><span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">response_code</span> <span class="o">==</span> <span class="s">'SUCCESS'</span><span class="p">:</span>
+
+    <span class="c"># Update the user and give them credentials</span>
+    <span class="n">user_login</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'merchant_order_id'</span><span class="p">]</span>
+    <span class="n">user</span> <span class="o">=</span> <span class="n">auth</span><span class="o">.</span><span class="n">getUser</span><span class="p">(</span><span class="n">user_login</span><span class="p">)</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+    <span class="n">data</span><span class="p">[</span><span class="s">'last_billed'</span><span class="p">]</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
+    <span class="n">data</span><span class="p">[</span><span class="s">'last_invoice'</span><span class="p">]</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'invoice_id'</span><span class="p">]</span>
+    <span class="n">data</span><span class="p">[</span><span class="s">'order_number'</span><span class="p">]</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'order_number'</span><span class="p">]</span>
+    <span class="n">data</span><span class="p">[</span><span class="s">'2co_status'</span><span class="p">]</span> <span class="o">=</span> <span class="s">'active'</span>
+    <span class="n">data</span><span class="p">[</span><span class="s">'date_expire'</span><span class="p">]</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span> <span class="o">+</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">(</span><span class="mi">1</span><span class="o">*</span><span class="mi">365</span><span class="o">/</span><span class="mi">12</span><span class="p">)</span>
+    <span class="n">auth</span><span class="o">.</span><span class="n">updateUser</span><span class="p">(</span><span class="n">user_login</span><span class="p">,</span> <span class="o">**</span><span class="n">data</span><span class="p">)</span>
+    <span class="n">auth</span><span class="o">.</span><span class="n">addPermission</span><span class="p">(</span><span class="s">'user'</span><span class="p">,</span> <span class="n">user</span><span class="o">.</span><span class="n">user_id</span><span class="p">)</span>
+
+    <span class="c"># Return buyer to success page</span>
+    <span class="k">return</span> <span class="n">render</span><span class="o">.</span><span class="n">success</span><span class="p">()</span>
+<span class="k">else</span><span class="p">:</span>
+
+    <span class="c"># Return buyer to fail page</span>
+    <span class="k">return</span> <span class="n">render</span><span class="o">.</span><span class="n">fail</span><span class="p">()</span>
+</pre></div>
+
+<p>Now we can setup our return method, enter our secret word and provide the approved URL path "http://localhost:8080/success" under the Site Management page in our 2Checkout admin.</p>
+
+<p><strong>Site Management Page</strong>
+<img src="http://github.com/2checkout/2checkout-python-tutorial/raw/master/img/webwidgets-2.png" alt=""></p>
+
+<p><strong>Lets try it out with a live sale.</strong>
+<img src="http://github.com/2checkout/2checkout-python-tutorial/raw/master/img/webwidgets-3.png" alt=""></p>
+
+<p><strong>Enter in our billing information and submit the payment.</strong>
+<img src="http://github.com/2checkout/2checkout-python-tutorial/raw/master/img/webwidgets-4.png" alt=""></p>
+
+<p><strong>Success Page.</strong>
+<img src="http://github.com/2checkout/2checkout-python-tutorial/raw/master/img/webwidgets-5.png" alt=""></p>
+
+<p>Now the user is activated and can login to access the content that they paid for.
+<img src="http://github.com/2checkout/2checkout-python-tutorial/raw/master/img/webwidgets-6.png" alt=""></p>
+
+<h2>Notifications</h2>
+
+<p>2Checkout will send notifications to our application under the following circumstances.</p>
+
+<ul>
+<li>Order Created</li>
+<li>Fraud Status Changed</li>
+<li>Shipping Status Changed</li>
+<li>Invoice Status Changed</li>
+<li>Refund Issued</li>
+<li>Recurring Installment Success</li>
+<li>Recurring Installment Failed</li>
+<li>Recurring Stopped</li>
+<li>Recurring Complete</li>
+<li>Recurring Restarted</li>
+</ul><p>For our application, we are interested in the Fraud Status Changed message to disable the user if the sale fails fraud review, Recurring Installment Failed message to disable the user if their sale fails to bill successfully, and the Recurring Installment Success message to re-enable a disabled user.</p>
+
+<p>Based on these requirements, lets go ahead and setup our notification class.</p>
+
+<p>code.py</p>
+
+<div class="highlight"><pre><span class="k">class</span> <span class="nc">notification</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">POST</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+
+        <span class="c"># Check validity of response</span>
+        <span class="n">params</span> <span class="o">=</span> <span class="n">web</span><span class="o">.</span><span class="n">input</span><span class="p">()</span>
+        <span class="n">params</span><span class="p">[</span><span class="s">'secret'</span><span class="p">]</span> <span class="o">=</span> <span class="s">'tango'</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">twocheckout</span><span class="o">.</span><span class="n">Notification</span><span class="o">.</span><span class="n">check</span><span class="p">(</span><span class="n">params</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">response_code</span> <span class="o">==</span> <span class="s">'SUCCESS'</span><span class="p">:</span>
+
+            <span class="c"># Handle Fraud Failure Message</span>
+            <span class="k">if</span> <span class="n">params</span><span class="p">[</span><span class="s">'message_type'</span><span class="p">]</span> <span class="o">==</span> <span class="s">'FRAUD_STATUS_CHANGED'</span> <span class="ow">and</span> <span class="n">params</span><span class="p">[</span><span class="s">'fraud_status'</span><span class="p">]</span> <span class="o">==</span> <span class="s">'fail'</span><span class="p">:</span>
+                <span class="n">user_login</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'vendor_order_id'</span><span class="p">]</span>
+                <span class="n">user</span> <span class="o">=</span> <span class="n">auth</span><span class="o">.</span><span class="n">getUser</span><span class="p">(</span><span class="n">user_login</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+                <span class="n">data</span><span class="p">[</span><span class="s">'2co_status'</span><span class="p">]</span> <span class="o">=</span> <span class="s">'failed'</span>
+                <span class="n">auth</span><span class="o">.</span><span class="n">updateUser</span><span class="p">(</span><span class="n">user_login</span><span class="p">,</span> <span class="o">**</span><span class="n">data</span><span class="p">)</span>
+                <span class="n">auth</span><span class="o">.</span><span class="n">removePermission</span><span class="p">(</span><span class="s">'user'</span><span class="p">,</span> <span class="n">user</span><span class="o">.</span><span class="n">user_id</span><span class="p">)</span>
+
+            <span class="c"># Handle Recurring Success Message</span>
+            <span class="k">elif</span> <span class="n">params</span><span class="p">[</span><span class="s">'message_type'</span><span class="p">]</span> <span class="o">==</span> <span class="s">'RECURRING_INSTALLMENT_SUCCESS'</span><span class="p">:</span>
+                <span class="n">user_login</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'vendor_order_id'</span><span class="p">]</span>
+                <span class="n">user</span> <span class="o">=</span> <span class="n">auth</span><span class="o">.</span><span class="n">getUser</span><span class="p">(</span><span class="n">user_login</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+                <span class="n">data</span><span class="p">[</span><span class="s">'last_billed'</span><span class="p">]</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
+                <span class="n">data</span><span class="p">[</span><span class="s">'last_invoice'</span><span class="p">]</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'invoice_id'</span><span class="p">]</span>
+                <span class="n">data</span><span class="p">[</span><span class="s">'2co_status'</span><span class="p">]</span> <span class="o">=</span> <span class="s">'active'</span>
+                <span class="n">data</span><span class="p">[</span><span class="s">'date_expire'</span><span class="p">]</span> <span class="o">=</span> <span class="n">user</span><span class="o">.</span><span class="n">last_billed</span> <span class="o">+</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">(</span><span class="mi">1</span><span class="o">*</span><span class="mi">365</span><span class="o">/</span><span class="mi">12</span><span class="p">)</span>
+                <span class="n">auth</span><span class="o">.</span><span class="n">updateUser</span><span class="p">(</span><span class="n">user_login</span><span class="p">,</span> <span class="o">**</span><span class="n">data</span><span class="p">)</span>
+                <span class="n">auth</span><span class="o">.</span><span class="n">addPermission</span><span class="p">(</span><span class="s">'user'</span><span class="p">,</span> <span class="n">user</span><span class="o">.</span><span class="n">user_id</span><span class="p">)</span>
+
+            <span class="c"># Handle Recurring Failed Message</span>
+            <span class="k">elif</span> <span class="n">params</span><span class="p">[</span><span class="s">'message_type'</span><span class="p">]</span> <span class="o">==</span> <span class="s">'RECURRING_INSTALLMENT_FAILED'</span><span class="p">:</span>
+                <span class="n">user_login</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'vendor_order_id'</span><span class="p">]</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+                <span class="n">data</span><span class="p">[</span><span class="s">'last_billed'</span><span class="p">]</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
+                <span class="n">data</span><span class="p">[</span><span class="s">'last_invoice'</span><span class="p">]</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'invoice_id'</span><span class="p">]</span>
+                <span class="n">data</span><span class="p">[</span><span class="s">'2co_status'</span><span class="p">]</span> <span class="o">=</span> <span class="s">'declined'</span>
+                <span class="n">auth</span><span class="o">.</span><span class="n">updateUser</span><span class="p">(</span><span class="n">user_login</span><span class="p">,</span> <span class="o">**</span><span class="n">data</span><span class="p">)</span>
+                <span class="n">user</span> <span class="o">=</span> <span class="n">auth</span><span class="o">.</span><span class="n">getUser</span><span class="p">(</span><span class="n">user_login</span><span class="p">)</span>
+                <span class="n">auth</span><span class="o">.</span><span class="n">removePermission</span><span class="p">(</span><span class="s">'user'</span><span class="p">,</span> <span class="n">user</span><span class="o">.</span><span class="n">user_id</span><span class="p">)</span>
+            <span class="k">return</span> <span class="s">'Message Success: '</span> <span class="o">+</span> <span class="n">params</span><span class="p">[</span><span class="s">'message_type'</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+
+            <span class="c"># Hash does not match, print fail message for debugging</span>
+            <span class="k">return</span> <span class="s">'Message Fail: '</span> <span class="o">+</span> <span class="n">params</span><span class="p">[</span><span class="s">'message_type'</span><span class="p">]</span>
+
+</pre></div>
+
+<p>We grab the message parameters and assign each key/value pair to our params dictionary. We also add our secret word to the dictionary using the <code>secret</code> key just like we did in the success class.</p>
+
+<div class="highlight"><pre><span class="n">params</span> <span class="o">=</span> <span class="n">web</span><span class="o">.</span><span class="n">input</span><span class="p">()</span>
+<span class="n">params</span><span class="p">[</span><span class="s">'secret'</span><span class="p">]</span> <span class="o">=</span> <span class="s">'tango'</span>
+</pre></div>
+
+<p>Then we pass the params dict to the <code>twocheckout.Notification.check()</code> binding, load the JSON response to a dictionary, and check the result.</p>
+
+<div class="highlight"><pre><span class="n">result</span> <span class="o">=</span> <span class="n">twocheckout</span><span class="o">.</span><span class="n">Notification</span><span class="o">.</span><span class="n">check</span><span class="p">(</span><span class="n">params</span><span class="p">)</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+</pre></div>
+
+<p>If the response is successful <code>result.response_code == 'SUCCESS'</code>, we can preform actions based on the <code>message_type</code> parameter value.</p>
+
+<p>For the Fraud Status Changed message, we will also check the value of the <code>fraud_status</code> parameter and disable the user if it equals 'fail'.</p>
+
+<div class="highlight"><pre><span class="k">if</span> <span class="n">params</span><span class="p">[</span><span class="s">'message_type'</span><span class="p">]</span> <span class="o">==</span> <span class="s">'FRAUD_STATUS_CHANGED'</span> <span class="ow">and</span> <span class="n">params</span><span class="p">[</span><span class="s">'fraud_status'</span><span class="p">]</span> <span class="o">==</span> <span class="s">'fail'</span><span class="p">:</span>
+    <span class="n">user_login</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'vendor_order_id'</span><span class="p">]</span>
+    <span class="n">user</span> <span class="o">=</span> <span class="n">auth</span><span class="o">.</span><span class="n">getUser</span><span class="p">(</span><span class="n">user_login</span><span class="p">)</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+    <span class="n">data</span><span class="p">[</span><span class="s">'2co_status'</span><span class="p">]</span> <span class="o">=</span> <span class="s">'failed'</span>
+    <span class="n">auth</span><span class="o">.</span><span class="n">updateUser</span><span class="p">(</span><span class="n">user_login</span><span class="p">,</span> <span class="o">**</span><span class="n">data</span><span class="p">)</span>
+    <span class="n">auth</span><span class="o">.</span><span class="n">removePermission</span><span class="p">(</span><span class="s">'user'</span><span class="p">,</span> <span class="n">user</span><span class="o">.</span><span class="n">user_id</span><span class="p">)</span>
+</pre></div>
+
+<p>For the Recurring Installment Failed message we will disable the user.</p>
+
+<div class="highlight"><pre><span class="k">elif</span> <span class="n">params</span><span class="p">[</span><span class="s">'message_type'</span><span class="p">]</span> <span class="o">==</span> <span class="s">'RECURRING_INSTALLMENT_FAILED'</span><span class="p">:</span>
+    <span class="n">user_login</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'vendor_order_id'</span><span class="p">]</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+    <span class="n">data</span><span class="p">[</span><span class="s">'last_billed'</span><span class="p">]</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
+    <span class="n">data</span><span class="p">[</span><span class="s">'last_invoice'</span><span class="p">]</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'invoice_id'</span><span class="p">]</span>
+    <span class="n">data</span><span class="p">[</span><span class="s">'2co_status'</span><span class="p">]</span> <span class="o">=</span> <span class="s">'declined'</span>
+    <span class="n">auth</span><span class="o">.</span><span class="n">updateUser</span><span class="p">(</span><span class="n">user_login</span><span class="p">,</span> <span class="o">**</span><span class="n">data</span><span class="p">)</span>
+    <span class="n">user</span> <span class="o">=</span> <span class="n">auth</span><span class="o">.</span><span class="n">getUser</span><span class="p">(</span><span class="n">user_login</span><span class="p">)</span>
+    <span class="n">auth</span><span class="o">.</span><span class="n">removePermission</span><span class="p">(</span><span class="s">'user'</span><span class="p">,</span> <span class="n">user</span><span class="o">.</span><span class="n">user_id</span><span class="p">)</span>
+<span class="k">return</span> <span class="s">'Message Success: '</span> <span class="o">+</span> <span class="n">params</span><span class="p">[</span><span class="s">'message_type'</span><span class="p">]</span>
+</pre></div>
+
+<p>For the Recurring Installment Success message we will enable the user.</p>
+
+<div class="highlight"><pre><span class="k">elif</span> <span class="n">params</span><span class="p">[</span><span class="s">'message_type'</span><span class="p">]</span> <span class="o">==</span> <span class="s">'RECURRING_INSTALLMENT_SUCCESS'</span><span class="p">:</span>
+    <span class="n">user_login</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'vendor_order_id'</span><span class="p">]</span>
+    <span class="n">user</span> <span class="o">=</span> <span class="n">auth</span><span class="o">.</span><span class="n">getUser</span><span class="p">(</span><span class="n">user_login</span><span class="p">)</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+    <span class="n">data</span><span class="p">[</span><span class="s">'last_billed'</span><span class="p">]</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
+    <span class="n">data</span><span class="p">[</span><span class="s">'last_invoice'</span><span class="p">]</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s">'invoice_id'</span><span class="p">]</span>
+    <span class="n">data</span><span class="p">[</span><span class="s">'2co_status'</span><span class="p">]</span> <span class="o">=</span> <span class="s">'active'</span>
+    <span class="n">data</span><span class="p">[</span><span class="s">'date_expire'</span><span class="p">]</span> <span class="o">=</span> <span class="n">user</span><span class="o">.</span><span class="n">last_billed</span> <span class="o">+</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">(</span><span class="mi">1</span><span class="o">*</span><span class="mi">365</span><span class="o">/</span><span class="mi">12</span><span class="p">)</span>
+    <span class="n">auth</span><span class="o">.</span><span class="n">updateUser</span><span class="p">(</span><span class="n">user_login</span><span class="p">,</span> <span class="o">**</span><span class="n">data</span><span class="p">)</span>
+    <span class="n">auth</span><span class="o">.</span><span class="n">addPermission</span><span class="p">(</span><span class="s">'user'</span><span class="p">,</span> <span class="n">user</span><span class="o">.</span><span class="n">user_id</span><span class="p">)</span>
+</pre></div>
+
+<p>Now we can setup our Notification URL path "http://localhost:8080/notification" and enable each message under the Notifications page in our 2Checkout admin.</p>
+
+<p><img src="http://github.com/2checkout/2checkout-python-tutorial/raw/master/img/webwidgets-7.png" alt=""></p>
+
+<p>Lets test our notification function. Now there are a couple ways to go about this. You can wait for the notifications to come on a live sale, or just head over to the <a href="http://developers.2checkout.com/inss">INS testing tool</a> and test the messages right now. Remember the MD5 hash must match so for easy testing, you must compute the hash based on like below:</p>
+
+<p><code>UPPERCASE(MD5_ENCRYPTED(sale\_id + vendor\_id + invoice\_id + Secret Word))</code></p>
+
+<p>You can just use an <a href="https://www.google.com/webhp?q=md5+generator">online MD5 Hash generator</a> and convert it to uppercase.</p>
+
+<h2>Cancel</h2>
+
+<p>We want to provide the user with the ability to cancel their membership and recurring billing without having to contact us. To cancel the recurring billing we will use the Sale stop binding to cancel all active recurring lineitems on the sale.</p>
+
+<p>To accomplish this we will setup a cancel confirmation template and a cancel class.</p>
+
+<p>templates/cancel.html</p>
+
+<div class="highlight"><pre><span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"container"</span><span class="nt">&gt;</span>
+    <span class="nt">&lt;h1&gt;</span>Are you sure?<span class="nt">&lt;/h1&gt;</span>
+    <span class="nt">&lt;p&gt;</span>Click the confirm button to cancel the recurring billing on your membership.<span class="nt">&lt;/p&gt;</span>
+    <span class="nt">&lt;p&gt;</span>We will refund you for your unused time with in 3-7 days.<span class="nt">&lt;/p&gt;</span>
+    <span class="nt">&lt;form</span> <span class="na">class=</span><span class="s">"form-horizontal"</span> <span class="na">id=</span><span class="s">"login-form"</span> <span class="na">action=</span><span class="s">"/cancel"</span> <span class="na">method=</span><span class="s">"post"</span><span class="nt">&gt;</span>
+        <span class="nt">&lt;input</span> <span class="na">type=</span><span class="s">"hidden"</span> <span class="na">name=</span><span class="s">"confirm"</span> <span class="na">id=</span><span class="s">"confirm"</span><span class="nt">&gt;</span>
+        <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"control-group"</span><span class="nt">&gt;</span>
+            <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"controls"</span><span class="nt">&gt;</span>
+                <span class="nt">&lt;button</span> <span class="na">type=</span><span class="s">"submit"</span> <span class="na">class=</span><span class="s">"btn btn-primary btn-large"</span><span class="nt">&gt;</span>Cancel Membership<span class="nt">&lt;/button&gt;</span>
+            <span class="nt">&lt;/div&gt;</span>
+        <span class="nt">&lt;/div&gt;</span>
+    <span class="nt">&lt;/form&gt;</span>
+<span class="nt">&lt;/div&gt;</span>
+</pre></div>
+
+<p>code.py</p>
+
+<div class="highlight"><pre><span class="k">class</span> <span class="nc">cancel</span><span class="p">:</span>
+    <span class="nd">@auth.protected</span><span class="p">(</span><span class="n">perm</span><span class="o">=</span><span class="s">'user'</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">GET</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">render</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+
+    <span class="nd">@auth.protected</span><span class="p">(</span><span class="n">perm</span><span class="o">=</span><span class="s">'user'</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">POST</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">user</span> <span class="o">=</span> <span class="n">auth</span><span class="o">.</span><span class="n">getUser</span><span class="p">()</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+        <span class="n">data</span><span class="p">[</span><span class="s">'2co_status'</span><span class="p">]</span> <span class="o">=</span> <span class="s">'canceled'</span>
+        <span class="n">auth</span><span class="o">.</span><span class="n">updateUser</span><span class="p">(</span><span class="n">user</span><span class="o">.</span><span class="n">user_login</span><span class="p">,</span> <span class="o">**</span><span class="n">data</span><span class="p">)</span>
+        <span class="n">auth</span><span class="o">.</span><span class="n">removePermission</span><span class="p">(</span><span class="s">'user'</span><span class="p">,</span> <span class="n">user</span><span class="o">.</span><span class="n">user_id</span><span class="p">)</span>
+
+        <span class="c"># Set 2Checkout API credentials</span>
+        <span class="n">twocheckout</span><span class="o">.</span><span class="n">Api</span><span class="o">.</span><span class="n">credentials</span><span class="p">({</span><span class="s">'username'</span><span class="p">:</span><span class="s">'APIuser1817037'</span><span class="p">,</span> <span class="s">'password'</span><span class="p">:</span><span class="s">'APIpass1817037'</span><span class="p">})</span>
+
+        <span class="c"># Stop recurring sale</span>
+        <span class="n">params</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s">'sale_id'</span><span class="p">:</span> <span class="n">user</span><span class="o">.</span><span class="n">order_number</span>
+        <span class="p">}</span>
+        <span class="n">sale</span> <span class="o">=</span> <span class="n">twocheckout</span><span class="o">.</span><span class="n">Sale</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="n">params</span><span class="p">)</span>
+        <span class="n">sale</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
+
+        <span class="c"># Calculate refund amount</span>
+        <span class="n">remaining_days</span> <span class="o">=</span> <span class="n">user</span><span class="o">.</span><span class="n">date_expire</span> <span class="o">-</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
+        <span class="n">refund_amount</span> <span class="o">=</span> <span class="nb">round</span><span class="p">((</span><span class="mf">1.00</span> <span class="o">/</span> <span class="mi">30</span><span class="p">)</span> <span class="o">*</span> <span class="n">remaining_days</span><span class="o">.</span><span class="n">days</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+
+        <span class="c"># Issue refund for remaining amount</span>
+        <span class="n">params</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s">'comment'</span><span class="p">:</span> <span class="s">"Refunding Remaining Balance"</span><span class="p">,</span>
+            <span class="s">'category'</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span>
+            <span class="s">'amount'</span><span class="p">:</span> <span class="n">refund_amount</span><span class="p">,</span>
+            <span class="s">'currency'</span><span class="p">:</span> <span class="s">"vendor"</span>
+            <span class="p">}</span>
+            <span class="n">invoice</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">sale</span><span class="o">.</span><span class="n">invoices</span><span class="p">)</span>
+        <span class="n">invoice</span><span class="o">.</span><span class="n">refund</span><span class="p">(</span><span class="n">params</span><span class="p">)</span>
+
+        <span class="k">raise</span> <span class="n">web</span><span class="o">.</span><span class="n">seeother</span><span class="p">(</span><span class="s">'/'</span><span class="p">)</span>
+</pre></div>
+
+<p>Our cancel class loads our cancel template for our user to confirm.</p>
+
+<p><img src="http://github.com/2checkout/2checkout-python-tutorial/raw/master/img/webwidgets-8.png" alt=""></p>
+
+<p>When we get the cancel confirmation from the user, we can use 2Checkout's back office API to cancel the recurring billing.</p>
+
+<p>We set our 2Checkout API username and password using the <code>twocheckout.Api.credentials()</code> method.</p>
+
+<div class="highlight"><pre><span class="n">twocheckout</span><span class="o">.</span><span class="n">Api</span><span class="o">.</span><span class="n">credentials</span><span class="p">({</span><span class="s">'username'</span><span class="p">:</span><span class="s">'APIuser1817037'</span><span class="p">,</span> <span class="s">'password'</span><span class="p">:</span><span class="s">'APIpass1817037'</span><span class="p">})</span>
+</pre></div>
+
+<p>Now we use the order_number to retrieve the sale and call the <code>stop()</code> method on the sale instance.</p>
+
+<div class="highlight"><pre><span class="n">params</span> <span class="o">=</span> <span class="p">{</span>
+<span class="s">'sale_id'</span><span class="p">:</span> <span class="n">user</span><span class="o">.</span><span class="n">order_number</span>
+<span class="p">}</span>
+<span class="n">sale</span> <span class="o">=</span> <span class="n">twocheckout</span><span class="o">.</span><span class="n">Sale</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="n">params</span><span class="p">)</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">sale</span><span class="o">.</span><span class="n">stop</span><span class="p">()</span>
+</pre></div>
+
+<p>Since we are going to disable the user, we should also go ahead and refund them for the unused days in their subscription. So we use the last_billed timestamp for the user to caclulate the unused days in their subscription.</p>
+
+<div class="highlight"><pre><span class="n">remaining_days</span> <span class="o">=</span> <span class="n">user</span><span class="o">.</span><span class="n">date_expire</span> <span class="o">-</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
+</pre></div>
+
+<p>We can then apply that to the subscription cost to get the refund amount.</p>
+
+<div class="highlight"><pre><span class="n">refund_amount</span> <span class="o">=</span> <span class="nb">round</span><span class="p">((</span><span class="mf">1.00</span> <span class="o">/</span> <span class="mi">30</span><span class="p">)</span> <span class="o">*</span> <span class="n">remaining_days</span><span class="o">.</span><span class="n">days</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+</pre></div>
+
+<p>To submit the refund, we create a new Invoice obejct from the most recent invoice in the Sale object and call the refund() method on it.</p>
+
+<div class="highlight"><pre><span class="n">params</span> <span class="o">=</span> <span class="p">{</span>
+<span class="s">'comment'</span><span class="p">:</span> <span class="s">"Refunding Remaining Balance"</span><span class="p">,</span>
+<span class="s">'category'</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span>
+<span class="s">'amount'</span><span class="p">:</span> <span class="n">refund_amount</span><span class="p">,</span>
+<span class="s">'currency'</span><span class="p">:</span> <span class="s">"vendor"</span>
+<span class="p">}</span>
+<span class="n">invoice</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">sale</span><span class="o">.</span><span class="n">invoices</span><span class="p">)</span>
+<span class="n">invoice</span><span class="o">.</span><span class="n">refund</span><span class="p">(</span><span class="n">params</span><span class="p">)</span>
+</pre></div>
+
+<h2>Update</h2>
+
+<p>This last one is easy. 2Checkout provides a page for users to update their billing information on a recurring sale. We could just define the URL in our navbar. But to make it easy for them, lets pass in the order_number when we redirect them.</p>
+
+<p><code>code.py</code></p>
+
+<div class="highlight"><pre><span class="k">class</span> <span class="nc">update</span><span class="p">:</span>
+    <span class="nd">@auth.protected</span><span class="p">(</span><span class="n">perm</span><span class="o">=</span><span class="s">'user'</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">GET</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">user</span> <span class="o">=</span> <span class="n">auth</span><span class="o">.</span><span class="n">getUser</span><span class="p">()</span>
+
+        <span class="c"># Build update billing link</span>
+        <span class="n">link</span> <span class="o">=</span> <span class="s">"https://www.2checkout.com/va/sales/customer/change_billing_method?sale_id="</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">user</span><span class="o">.</span><span class="n">order_number</span><span class="p">)</span>
+        <span class="k">raise</span> <span class="n">web</span><span class="o">.</span><span class="n">seeother</span><span class="p">(</span><span class="n">link</span><span class="p">)</span>
+</pre></div>
+
+<h2>Conclusion</h2>
+
+<p>Now our application is fully integrated! Our users can register, pay for their membership and immediatly get access. We update the user based on the 2Checkout INS messages, and we provided the user with the ability to cancel the order or update their billing information.</p>
+      </section>
+    </div>
+
+    <!-- FOOTER  -->
+    <div id="footer_wrap" class="outer">
+      <footer class="inner">
+        <p class="copyright">2Checkout Python Tutorial maintained by <a href="https://github.com/2Checkout">2Checkout</a></p>
+        <p>Published with <a href="http://pages.github.com">GitHub Pages</a></p>
+      </footer>
+    </div>
+
+    
+
+  </body>
+</html>
